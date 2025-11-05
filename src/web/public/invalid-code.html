@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Código Inválido</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1 class="error-title">Oops!</h1>
+            <p id="error-message">Este código de gift é inválido, expirou ou já atingiu o limite de usos.</p>
+            <p>Por favor, verifique o link ou peça um novo.</p>
+        </div>
+    </div>
+    <script>
+        // Opcional: checar query params para msg de erro
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('error') === 'cancelled') {
+            document.getElementById('error-message').textContent = 'A autenticação foi cancelada.';
+        }
+    </script>
+</body>
+</html>

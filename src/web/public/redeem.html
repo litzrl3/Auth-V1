@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resgatar Gift</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>Resgatar Gift</h1>
+            <p id="loading-text">Carregando informações do gift...</p>
+            <p id="uses-text" style="display: none;"></p>
+            
+            <!-- O botão será um link, preenchido pelo JS -->
+            <a href="#" id="redeem-button" class="button disabled">
+                Resgatar com Discord
+            </a>
+            
+            <p id="error-text" class="error-message"></p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            const code = window.location.pathname.split('/').pop();
+            const button = document.getElementById('redeem-button');
+            const loadingText = document.getElementById('loading-text');
+            const usesText = document.getElementById('uses-text');
+            const errorText = document.getElementById('error-text');
+
+            if (!code) {
+                loadingText.style.display = 'none';
+                errorText.textContent = 'Nenhum código fornecido.';
+                return;
+            }
+
+            try {
+                // Busca a URL de auth e os usos restantes
+                const response = await fetch(`/redeem/init/${code}`);
+                const data = await response.json();
+
+                if (response.ok) {
+                    loadingText.style.display = 'none';
+                    usesText.textContent = `Usos restantes: ${data.usesRemaining}`;
+                    usesText.style.display = 'block';
+                    
+                    button.href = data.oauthUrl;
+                    button.classList.remove('disabled');
+                } else {
+                    loadingText.style.display = 'none';
+                    errorText.textContent = data.error || 'Erro ao carregar o gift.';
+                }
+            } catch (error) {
+                loadingText.style.display = 'none';
+                errorText.textContent = 'Não foi possível conectar ao servidor.';
+            }
+        });
+    </script>
+</body>
+</html>
