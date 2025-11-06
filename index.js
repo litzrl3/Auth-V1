@@ -1,6 +1,6 @@
-const { startBot } = require('./src/bot/index.js');
-const server = require('./src/web/server.js');
-const { connectDb } = require('./src/database/database.js'); // MUDADO
+// const { startBot } = require('./src/bot/index.js'); // <--- REMOVIDO
+const server = require('./src/web/server.js');         // <--- MOVIDO
+const { connectDb } = require('./src/database/database.js');
 
 // Função principal assíncrona
 async function main() {
@@ -9,10 +9,11 @@ async function main() {
     await connectDb();
     
     // 2. Inicia o Bot do Discord
-    startBot();
+    // Ao "carregar" este módulo, o código dentro dele (incluindo client.login) é executado.
+    require('./src/bot/index.js');
     
     // O servidor web (Express) já é iniciado em './src/web/server.js'
-    // (foi 'required')
+    // (foi 'required' no topo e já está ouvindo a porta)
     
   } catch (error) {
     console.error("Falha ao iniciar a aplicação:", error);
