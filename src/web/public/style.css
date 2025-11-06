@@ -118,3 +118,8 @@ p {
 @keyframes fill {
     100% { box-shadow: inset 0px 0px 0px 40px #43B581; }
 }
+
+/* REMOVIDO: O novo gift-redeem.html usa Tailwind CSS 
+   para estilizar as caixas de sucesso/erro, 
+   então não precisamos de classes CSS customizadas aqui.
+*/
