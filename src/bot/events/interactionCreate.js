@@ -13,11 +13,11 @@ const {
 const db = require('../../database/database.js');
 const { clientId, redirectUri, scopes } = require('../../../config.js');
 const crypto = require('crypto');
-const client = require('../index.js'); // Importa o cliente
+// const client = require('../index.js'); // REMOVIDO - Esta era a causa do bug
 
 // --- FUNÇÕES AUXILIARES ---
 
-// Constrói a embed de preview
+// (Funções buildPreviewEmbed e sendEmbedConfigMenu permanecem iguais)
 function buildPreviewEmbed(config) {
     const embed = new EmbedBuilder()
         .setTitle(config?.title || 'Verifique-se')
@@ -34,8 +34,6 @@ function buildPreviewEmbed(config) {
     
     return embed;
 }
-
-// Envia a mensagem de configuração da embed (Foto 2)
 async function sendEmbedConfigMenu(interaction) {
    const config = db.getEmbedConfig(interaction.guildId);
    const previewEmbed = buildPreviewEmbed(config);
@@ -65,6 +63,7 @@ async function sendEmbedConfigMenu(interaction) {
       ephemeral: true
    });
 }
+
 
 // --- LÓGICA PRINCIPAL DE INTERAÇÕES ---
 
@@ -171,14 +170,15 @@ module.exports = {
         
         const mainGuildId = db.getMainGuild()?.value;
         if (!mainGuildId) {
-            return interaction.editReply('Erro: Servidor principal não definido. Use `/config servidor`.');
+            return interaction.editReply('Erro: Servidor principal não definido.');
         }
         const config = db.getConfig(mainGuildId);
         if (!config?.verified_role_id) {
             return interaction.editReply('Erro: Cargo de verificado não definido para o servidor principal.');
         }
 
-        const guild = await client.guilds.fetch(mainGuildId);
+        // CORREÇÃO: Usando interaction.client
+        const guild = await interaction.client.guilds.fetch(mainGuildId);
         const role = await guild.roles.fetch(config.verified_role_id);
         if (!role) {
             return interaction.editReply('Erro: Cargo de verificado não encontrado no servidor.');
@@ -188,7 +188,7 @@ module.exports = {
         let addedCount = 0;
         let alreadyHadCount = 0;
 
-        await guild.members.fetch(); // Cache de todos os membros
+        await guild.members.fetch(); 
 
         for (const user of usersInDb) {
             const member = guild.members.cache.get(user.user_id);
@@ -200,9 +200,6 @@ module.exports = {
                     alreadyHadCount++;
                 }
             }
-            // Nota: Puxar membros (guild.members.add) é complexo e requer
-            // atualização de tokens (refresh tokens), o que foge do escopo
-            // desta implementação simplificada. Isto apenas sincroniza quem JÁ ESTÁ no server.
         }
         
         await interaction.editReply(`Sincronização concluída!\n- ${addedCount} membros receberam o cargo.\n- ${alreadyHadCount} membros já tinham o cargo.`);
@@ -227,7 +224,7 @@ module.exports = {
 
       if (customId === 'reset_embed_button') {
         db.resetEmbedConfig(interaction.guildId);
-        const newEmbed = buildPreviewEmbed(null); // Constrói com padrão
+        const newEmbed = buildPreviewEmbed(null); 
         await interaction.update({ content: 'Configuração da embed resetada.', embeds: [newEmbed] });
       }
     }
@@ -244,17 +241,18 @@ module.exports = {
         const webhookUrl = interaction.fields.getTextInputValue('webhook_url_input') || null;
         const mainGuildId = interaction.fields.getTextInputValue('main_guild_id_input');
         
-        // Validação
         if (webhookUrl && !webhookUrl.startsWith('https://discord.com/api/webhooks/')) {
             return interaction.editReply('URL de Webhook inválida.');
         }
 
         try {
-            await client.guilds.fetch(mainGuildId);
+            // CORREÇÃO: Usando interaction.client
+            await interaction.client.guilds.fetch(mainGuildId);
         } catch {
             return interaction.editReply('ID do Servidor Principal inválido.');
         }
 
+        // CORREÇÃO: Usando interaction.guildId para a config local, e mainGuildId para a global
         db.setConfig(interaction.guildId, roleId, webhookUrl);
         db.setMainGuild(mainGuildId);
         
@@ -282,7 +280,7 @@ module.exports = {
             try {
                 db.createGift(code, uses, interaction.user.id);
                 generatedCodes.push(`${baseUrl}/redeem/${code}`);
-            } catch (error) { i--; } // Tenta novamente
+            } catch (error) { i--; } 
         }
         
         const replyMessage = `**Links de Gift Gerados (Usos: ${uses})**\n\n${generatedCodes.join('\n')}`;
@@ -291,20 +289,19 @@ module.exports = {
 
       // --- Modal: Perguntando elemento da Embed (ex: Título) ---
       if (customId.startsWith('embed_edit_modal_')) {
-        const element = customId.replace('embed_edit_modal_', ''); // 'title', 'description', etc.
+        const element = customId.replace('embed_edit_modal_', ''); 
         const value = interaction.fields.getTextInputValue('element_value_input');
 
-        if (element === 'color' && !/^#[0-9A-F]{6}$/i.test(value)) {
+        if (element === 'color' && value && !/^#[0-9A-F]{6}$/i.test(value)) {
             await interaction.reply({ content: 'Cor inválida. Use o formato Hex (Ex: #5865F2)', ephemeral: true });
             return;
         }
 
-        db.setEmbedConfigField(interaction.guildId, element, value);
+        db.setEmbedConfigField(interaction.guildId, element, value || null); // Salva null se vazio
         
         const config = db.getEmbedConfig(interaction.guildId);
         const newEmbed = buildPreviewEmbed(config);
-
-        // Atualiza a mensagem de menu (que está no interaction.message)
+        
         await interaction.update({ embeds: [newEmbed] });
       }
       
@@ -320,7 +317,6 @@ module.exports = {
           }
 
           const config = db.getEmbedConfig(interaction.guildId);
-          // Constrói a embed final (sem o footer de preview)
           const embed = new EmbedBuilder()
             .setTitle(config?.title || 'Verifique-se')
             .setDescription(config?.description || 'Clique no botão abaixo para se verificar e ter acesso ao servidor.')
@@ -329,7 +325,7 @@ module.exports = {
           try {
             if (config?.image_url) embed.setImage(config.image_url);
             if (config?.thumbnail_url) embed.setThumbnail(config.thumbnail_url);
-          } catch(e) {/* Ignora URLs inválidas no envio final */}
+          } catch(e) {/* Ignora */}
 
           const buttonText = config?.button_text || 'Verificar';
 
@@ -342,8 +338,13 @@ module.exports = {
             .setEmoji('✅');
           const row = new ActionRowBuilder().addComponents(button);
 
-          await channel.send({ embeds: [embed], components: [row] });
-          await interaction.editReply(`Mensagem de autenticação enviada para ${channel}!`);
+          try {
+            await channel.send({ embeds: [embed], components: [row] });
+            await interaction.editReply(`Mensagem de autenticação enviada para ${channel}!`);
+          } catch (e) {
+            console.error(e);
+            await interaction.editReply('Erro ao enviar mensagem. Verifique se eu tenho permissão para falar nesse canal.');
+          }
       }
     }
 
@@ -352,7 +353,7 @@ module.exports = {
       const customId = interaction.customId;
 
       if (customId === 'embed_element_select') {
-        const elementToEdit = interaction.values[0]; // 'title', 'description', etc.
+        const elementToEdit = interaction.values[0]; 
         const config = db.getEmbedConfig(interaction.guildId) || {};
         
         const modal = new ModalBuilder()
@@ -361,7 +362,7 @@ module.exports = {
           
         const input = new TextInputBuilder()
           .setCustomId('element_value_input')
-          .setLabel('Novo valor')
+          .setLabel('Novo valor (deixe vazio para remover)')
           .setStyle(elementToEdit === 'description' ? TextInputStyle.Paragraph : TextInputStyle.Short)
           .setValue(config[elementToEdit] || '')
           .setPlaceholder(elementToEdit === 'color' ? '#5865F2' : '...')
