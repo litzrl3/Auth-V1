@@ -1,13 +1,14 @@
 const router = require('express').Router();
 const path = require('path');
-const db = require('../../database/database.js');
-const botClient = require('../../bot/index.js'); // Importa o cliente do bot
+const { dbWrapper } = require('../../database/database.js'); // MUDADO
+const botClient = require('../../bot/index.js');
 
 // Rota GET para a página de resgate (Foto 3)
-// Ex: https://.../redeem/ABC123
-router.get('/redeem/:code', (req, res) => {
+// Ex: https://.../redeem/redeem/ABC123
+router.get('/redeem/:code', async (req, res) => { // MUDADO: Adicionado async
   const code = req.params.code;
-  const gift = db.getGift(code);
+  // CORREÇÃO: Adicionado async/await
+  const gift = await dbWrapper.getGift(code);
 
   // Verifica se o gift existe e NÃO foi usado
   if (!gift || gift.is_used) {
@@ -26,7 +27,8 @@ router.post('/redeem/pull', async (req, res) => {
         return res.status(400).json({ error: 'Código ou ID do servidor faltando.' });
     }
 
-    const gift = db.getGift(code);
+    // CORREÇÃO: Adicionado async/await
+    const gift = await dbWrapper.getGift(code);
 
     // 1. Validar o gift
     if (!gift) {
@@ -46,14 +48,16 @@ router.post('/redeem/pull', async (req, res) => {
 
     // 3. Puxar Membros
     const memberCount = gift.member_count;
-    const usersToPull = db.getRandomUsers(memberCount);
+    // CORREÇÃO: Adicionado async/await
+    const usersToPull = await dbWrapper.getRandomUsers(memberCount);
 
     if (usersToPull.length < memberCount) {
         return res.status(500).json({ error: `Não há usuários suficientes na database (${usersToPull.length}/${memberCount}).` });
     }
 
-    // 4. Marcar gift como usado (Importante: fazer antes de puxar)
-    const usedSuccess = db.useGift(code);
+    // 4. Marcar gift como usado
+    // CORREÇÃO: Adicionado async/await
+    const usedSuccess = await dbWrapper.useGift(code);
     if (!usedSuccess) {
          return res.status(500).json({ error: 'Erro de concorrência. Tente novamente.' });
     }

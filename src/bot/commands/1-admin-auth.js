@@ -1,6 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const db = require('../../database/database.js');
-// const client = require('../index.js'); // REMOVIDO - Esta era a causa do bug
+const { dbWrapper } = require('../../database/database.js'); // MUDADO
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -9,16 +8,17 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     
   async execute(interaction) {
-    // Usamos interaction.client em vez de 'client'
     await interaction.deferReply({ ephemeral: true });
 
-    const mainGuildId = db.getMainGuild()?.value;
+    // CORREÇÃO: Adicionado await e .value
+    const mainGuildData = await dbWrapper.getMainGuild();
+    const mainGuildId = mainGuildData?.value;
+
     let mainGuildName = "Nenhum";
-    let puxadas = 0; 
+    let puxadas = 0; // Você pode implementar essa lógica depois
     
     if (mainGuildId) {
       try {
-        // CORREÇÃO: Usando interaction.client
         const guild = await interaction.client.guilds.fetch(mainGuildId);
         mainGuildName = guild.name;
       } catch (error) {
@@ -26,28 +26,27 @@ module.exports = {
       }
     }
 
-    const userCount = db.getUserCount();
+    // CORREÇÃO: Adicionado await
+    const userCount = await dbWrapper.getUserCount();
 
-    // Embed principal (estilo Foto 1)
+    // Embed principal
     const embed = new EmbedBuilder()
-      // CORREÇÃO: Usando interaction.client
       .setTitle(`BOT AUTH - ${interaction.client.user.username}`)
       .setColor('#5865F2')
       .setThumbnail(interaction.client.user.displayAvatarURL())
       .addFields(
-        // CORREÇÃO: Usando interaction.client
         { name: 'Nome da Aplicação', value: interaction.client.user.username, inline: true },
         { name: 'Usuário(s) Válido(s)', value: `\`${userCount}\` usuários`, inline: true },
         { name: 'Quantidades de Puxadas', value: `\`${puxadas}\` puxadas`, inline: true },
       )
       .setTimestamp();
 
-    // Botões (estilo Foto 1)
+    // Botões
     const row1 = new ActionRowBuilder()
       .addComponents(
         new ButtonBuilder()
-          .setCustomId('sync_members_button')
-          .setLabel('Puxar Membros (Sincronizar)')
+          .setCustomId('push_members_button') // ID ATUALIZADO
+          .setLabel('Puxar Membros') // Texto ATUALIZADO
           .setStyle(ButtonStyle.Secondary)
           .setEmoji('👥'),
         new ButtonBuilder()
@@ -68,7 +67,7 @@ module.exports = {
                 .setCustomId('config_message_button')
                 .setLabel('Configurar Mensagem Auth')
                 .setStyle(ButtonStyle.Primary)
-                .setEmoji('📝'), // Emoji de Lápis
+                .setEmoji('📝'),
         );
 
     await interaction.editReply({ embeds: [embed], components: [row1, row2] });

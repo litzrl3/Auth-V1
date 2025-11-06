@@ -1,127 +1,138 @@
-const Database = require('better-sqlite3');
-const db = new Database('authbot.db');
+const { MongoClient, ServerApiVersion } = require('mongodb');
+const { mongodbUri } = require('../../config.js');
 
-db.pragma('journal_mode = WAL');
+// Cria um novo cliente MongoDB
+const client = new MongoClient(mongodbUri, {
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  }
+});
 
-// Tabela de Configurações por Servidor
-db.exec(`
-  CREATE TABLE IF NOT EXISTS config (
-    guild_id TEXT PRIMARY KEY,
-    verified_role_id TEXT,
-    log_webhook_url TEXT
-  )
-`);
+let db;
 
-// Configuração Global (qual é o servidor principal)
-db.exec(`
-  CREATE TABLE IF NOT EXISTS global_config (
-    key TEXT PRIMARY KEY,
-    value TEXT
-  )
-`);
+// Coleções (equivalente às tabelas)
+let usersCollection;
+let configCollection;
+let globalConfigCollection;
+let giftsCollection;
+let embedConfigCollection;
 
-// Tabela de Usuários Verificados
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    user_id TEXT PRIMARY KEY,
-    username TEXT,
-    access_token TEXT,
-    refresh_token TEXT,
-    auth_date INTEGER
-  )
-`);
+// --- FUNÇÃO DE CONEXÃO E INICIALIZAÇÃO ---
+const connectDb = async () => {
+  try {
+    await client.connect();
+    db = client.db("AuthBotDB"); // Você pode nomear seu DB aqui
+    
+    // Define as coleções
+    usersCollection = db.collection("users");
+    configCollection = db.collection("config");
+    globalConfigCollection = db.collection("global_config");
+    giftsCollection = db.collection("gifts");
+    embedConfigCollection = db.collection("embed_config");
 
-// Tabela de "Gift Cards"
-db.exec(`
-  CREATE TABLE IF NOT EXISTS gifts (
-    code TEXT PRIMARY KEY,
-    member_count INTEGER,
-    is_used INTEGER DEFAULT 0,
-    created_by TEXT
-  )
-`);
+    // Cria índices para garantir valores únicos onde necessário
+    await usersCollection.createIndex({ user_id: 1 }, { unique: true });
+    await configCollection.createIndex({ guild_id: 1 }, { unique: true });
+    await globalConfigCollection.createIndex({ key: 1 }, { unique: true });
+    await giftsCollection.createIndex({ code: 1 }, { unique: true });
+    await embedConfigCollection.createIndex({ guild_id: 1 }, { unique: true });
 
-// NOVA Tabela: Configuração da Embed de Autenticação
-db.exec(`
-  CREATE TABLE IF NOT EXISTS embed_config (
-    guild_id TEXT PRIMARY KEY,
-    title TEXT,
-    description TEXT,
-    color TEXT,
-    image_url TEXT,
-    thumbnail_url TEXT,
-    button_text TEXT
-  )
-`);
-
-const dbWrapper = {
-  // Config
-  setConfig: (guildId, roleId, webhookUrl) => {
-    const stmt = db.prepare('INSERT OR REPLACE INTO config (guild_id, verified_role_id, log_webhook_url) VALUES (?, ?, ?)');
-    stmt.run(guildId, roleId, webhookUrl);
-  },
-  getConfig: (guildId) => {
-    return db.prepare('SELECT * FROM config WHERE guild_id = ?').get(guildId);
-  },
-  setMainGuild: (guildId) => {
-    db.prepare('INSERT OR REPLACE INTO global_config (key, value) VALUES (?, ?)').run('main_guild_id', guildId);
-  },
-  getMainGuild: () => {
-    return db.prepare('SELECT value FROM global_config WHERE key = ?').get('main_guild_id');
-  },
-
-    // Users
-  addUser: (userId, username, accessToken, refreshToken) => {
-    const stmt = db.prepare('INSERT OR REPLACE INTO users (user_id, username, access_token, refresh_token, auth_date) VALUES (?, ?, ?, ?, ?)');
-    stmt.run(userId, username, accessToken, refreshToken, Math.floor(Date.now() / 1000));
-  },
-  getUser: (userId) => {
-    return db.prepare('SELECT * FROM users WHERE user_id = ?').get(userId);
-  },
-  getAllUsers: () => {
-    return db.prepare('SELECT * FROM users').all();
-  },
-  // NOVA FUNÇÃO: Pega N usuários aleatórios
-  getRandomUsers: (limit) => {
-    return db.prepare('SELECT * FROM users ORDER BY RANDOM() LIMIT ?').all(limit);
-  },
-  getUserCount: () => {
-    return db.prepare('SELECT COUNT(*) as count FROM users').get().count;
-  },
-
-  // Gifts (MUDADO)
-  createGift: (code, memberCount, createdBy) => {
-    const stmt = db.prepare('INSERT INTO gifts (code, member_count, created_by) VALUES (?, ?, ?)');
-    stmt.run(code, memberCount, createdBy);
-  },
-  getGift: (code) => {
-    return db.prepare('SELECT * FROM gifts WHERE code = ?').get(code);
-  },
-  // MUDADO: Marca o gift como usado
-  // Retorna true se a atualização foi bem-sucedida
-  useGift: (code) => {
-    const stmt = db.prepare('UPDATE gifts SET is_used = 1 WHERE code = ? AND is_used = 0');
-    const result = stmt.run(code);
-    return result.changes > 0;
-  },
-  getGiftCount: () => {
-    return db.prepare('SELECT COUNT(*) as count FROM gifts').get().count;
-  },
-
-  // Embed Config
-  getEmbedConfig: (guildId) => {
-    return db.prepare('SELECT * FROM embed_config WHERE guild_id = ?').get(guildId);
-  },
-  setEmbedConfigField: (guildId, field, value) => {
-    // Garante que a linha exista
-    db.prepare('INSERT OR IGNORE INTO embed_config (guild_id) VALUES (?)').run(guildId);
-    // Atualiza o campo específico
-    const stmt = db.prepare(`UPDATE embed_config SET ${field} = ? WHERE guild_id = ?`);
-    stmt.run(value, guildId);
-  },
-  resetEmbedConfig: (guildId) => {
-     db.prepare('DELETE FROM embed_config WHERE guild_id = ?').run(guildId);
+    console.log("Conectado ao MongoDB Atlas com sucesso!");
+  } catch (err) {
+    console.error('Erro ao conectar ou inicializar o MongoDB:', err);
+    process.exit(1); // Encerra a aplicação se o DB falhar
   }
 };
 
-module.exports = dbWrapper;
+// --- FUNÇÕES DE ACESSO (REESCRITAS PARA MONGODB) ---
+// Usamos _id para o ID do documento do Mongo, e campos como user_id para o ID do Discord.
+
+const dbWrapper = {
+  // Config
+  setConfig: async (guildId, roleId, webhookUrl) => {
+    await configCollection.updateOne(
+      { guild_id: guildId },
+      { $set: { verified_role_id: roleId, log_webhook_url: webhookUrl } },
+      { upsert: true } // Cria o documento se não existir
+    );
+  },
+  getConfig: async (guildId) => {
+    return await configCollection.findOne({ guild_id: guildId });
+  },
+  setMainGuild: async (guildId) => {
+    await globalConfigCollection.updateOne(
+      { key: 'main_guild_id' },
+      { $set: { value: guildId } },
+      { upsert: true }
+    );
+  },
+  getMainGuild: async () => {
+    return await globalConfigCollection.findOne({ key: 'main_guild_id' });
+  },
+
+  // Users
+  addUser: async (userId, username, accessToken, refreshToken) => {
+    await usersCollection.updateOne(
+      { user_id: userId },
+      { $set: { username, access_token: accessToken, refresh_token: refreshToken, auth_date: new Date() } },
+      { upsert: true }
+    );
+  },
+  getUser: async (userId) => {
+    return await usersCollection.findOne({ user_id: userId });
+  },
+  getAllUsers: async () => {
+    return await usersCollection.find().toArray();
+  },
+  getRandomUsers: async (limit) => {
+    // $sample é o método aggregate do Mongo para pegar aleatórios
+    return await usersCollection.aggregate([{ $sample: { size: limit } }]).toArray();
+  },
+  getUserCount: async () => {
+    return await usersCollection.countDocuments();
+  },
+
+  // Gifts
+  createGift: async (code, memberCount, createdBy) => {
+    await giftsCollection.insertOne({
+      code: code,
+      member_count: memberCount,
+      created_by: createdBy,
+      is_used: false,
+      created_at: new Date()
+    });
+  },
+  getGift: async (code) => {
+    return await giftsCollection.findOne({ code: code });
+  },
+  useGift: async (code) => {
+    const result = await giftsCollection.updateOne(
+      { code: code, is_used: false },
+      { $set: { is_used: true } }
+    );
+    return result.modifiedCount > 0; // Retorna true se 1 documento foi modificado
+  },
+  getGiftCount: async () => {
+    return await giftsCollection.countDocuments();
+  },
+
+  // Embed Config
+  getEmbedConfig: async (guildId) => {
+    return await embedConfigCollection.findOne({ guild_id: guildId });
+  },
+  setEmbedConfigField: async (guildId, field, value) => {
+    // $set com colchetes permite usar uma variável como nome da chave
+    await embedConfigCollection.updateOne(
+      { guild_id: guildId },
+      { $set: { [field]: value } },
+      { upsert: true }
+    );
+  },
+  resetEmbedConfig: async (guildId) => {
+     await embedConfigCollection.deleteOne({ guild_id: guildId });
+  }
+};
+
+module.exports = { dbWrapper, connectDb };

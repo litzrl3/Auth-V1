@@ -1,17 +1,21 @@
 {
   "name": "discord-auth-bot",
   "version": "1.0.0",
-  "description": "Bot de autenticação Discord com OAuth2",
+  "description": "Bot de autenticação Discord OAuth2",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "deploy": "node src/bot/deploy-commands.js"
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
-    "axios": "^1.6.8",
-    "better-sqlite3": "^9.6.0",
-    "discord.js": "^14.15.2",
+    "discord.js": "^14.15.3",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2"
-  }
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2",
+    "mongodb": "^6.8.0"
+  },
+  "type": "commonjs"
 }

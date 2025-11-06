@@ -1,10 +1,24 @@
-// Ponto de entrada principal
-// Este arquivo inicia o Bot Discord e o Servidor Web.
+const { startBot } = require('./src/bot/index.js');
+const server = require('./src/web/server.js');
+const { connectDb } = require('./src/database/database.js'); // MUDADO
 
-// Inicia o Bot
-require('./src/bot/index.js');
+// Função principal assíncrona
+async function main() {
+  try {
+    // 1. Conecta e Inicializa o Banco de Dados (MongoDB)
+    await connectDb();
+    
+    // 2. Inicia o Bot do Discord
+    startBot();
+    
+    // O servidor web (Express) já é iniciado em './src/web/server.js'
+    // (foi 'required')
+    
+  } catch (error) {
+    console.error("Falha ao iniciar a aplicação:", error);
+    process.exit(1);
+  }
+}
 
-// Inicia o Servidor Web
-require('./src/web/server.js');
-
-console.log("Aplicação (Bot e Servidor Web) iniciada...");
+// Inicia a aplicação
+main();
