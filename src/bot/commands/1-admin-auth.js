@@ -50,12 +50,12 @@ module.exports = {
           .setLabel('Puxar Membros')
           .setStyle(ButtonStyle.Primary)
           .setEmoji('👥'),
-        new ButtonBuilder() // <- CORRIGIDO (era ButtonButtonBuilder)
+        new ButtonBuilder() // Corrigido
           .setCustomId('config_server_button')
           .setLabel('Configurar Servidores')
           .setStyle(ButtonStyle.Secondary)
           .setEmoji('⚙️'),
-        new ButtonButtonBuilder()
+        new ButtonBuilder() // Corrigido
           .setCustomId('create_gift_button')
           .setLabel('Criar Gift-Cards')
           .setStyle(ButtonStyle.Success)
