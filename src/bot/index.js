@@ -1,44 +1,58 @@
-const fs = require('node:fs');
-const path = require('node:path');
+const fs = require('fs');
+const path = require('path');
 const { Client, Collection, GatewayIntentBits } = require('discord.js');
-const { token } = require('../../config.js');
+const config = require('../../config'); // Vai ler o token do config.js
 
+// Cria um novo cliente
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers, // Necessário para guildMemberAdd
-  ],
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers, // Você confirmou que esta Intent está LIGADA
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent // Você confirmou que esta Intent está LIGADA
+    ]
 });
 
-// Carregar Comandos
+// Carrega os comandos
 client.commands = new Collection();
 const commandsPath = path.join(__dirname, 'commands');
-const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js')).sort();
+const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 
 for (const file of commandFiles) {
-  const filePath = path.join(commandsPath, file);
-  const command = require(filePath);
-  if ('data' in command && 'execute' in command) {
+    const filePath = path.join(commandsPath, file);
+    const command = require(filePath);
     client.commands.set(command.data.name, command);
-  } else {
-    console.warn(`[AVISO] O comando em ${filePath} está faltando a propriedade "data" ou "execute".`);
-  }
 }
 
-// Carregar Eventos
+// Carrega os eventos
 const eventsPath = path.join(__dirname, 'events');
 const eventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith('.js'));
 
 for (const file of eventFiles) {
-  const filePath = path.join(eventsPath, file);
-  const event = require(filePath);
-  if (event.once) {
-    client.once(event.name, (...args) => event.execute(...args));
-  } else {
-    client.on(event.name, (...args) => event.execute(...args));
-  }
+    const filePath = path.join(eventsPath, file);
+    const event = require(filePath);
+    if (event.once) {
+        client.once(event.name, (...args) => event.execute(...args));
+    } else {
+        client.on(event.name, (...args) => event.execute(...args));
+    }
 }
 
-client.login(token);
+// --- MUDANÇA IMPORTANTE ---
+// Tenta fazer o login
+client.login(config.token)
+    .then(() => {
+        // Não precisamos fazer nada aqui, o evento 'ready' vai cuidar disso.
+    })
+    .catch(err => {
+        // Se o login falhar (Token Inválido, Intents Erradas),
+        // vamos logar o erro e 'crashar' o processo.
+        console.error("================================================");
+        console.error("FALHA AO LOGAR NO DISCORD!");
+        console.error("Verifique o BOT_TOKEN e as Intents no Portal do Discord.");
+        console.error(err.message); // Mostra o erro exato
+        console.error("================================================");
+        process.exit(1); // Força o crash
+    });
 
 module.exports = client;
