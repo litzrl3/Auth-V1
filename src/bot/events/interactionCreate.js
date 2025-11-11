@@ -12,7 +12,7 @@ const {
 const { dbWrapper } = require('../../database/database.js');
 const { v4: uuidv4 } = require('uuid');
 const { clientId, redirectUri, scopes, baseUrl } = require('../../../config.js');
-const botClient = require('../index.js'); // Importa o cliente do bot
+// REMOVIDO: const botClient = require('../index.js'); (Isso causava o erro)
 
 module.exports = {
 	name: Events.InteractionCreate,
@@ -231,7 +231,8 @@ module.exports = {
                     // Verifica se o bot está no servidor
                     let guild;
                     try {
-                        guild = await botClient.guilds.fetch(guildId);
+                        // CORREÇÃO: Usa 'interaction.client'
+                        guild = await interaction.client.guilds.fetch(guildId);
                     } catch {
                         return interaction.editReply({ content: 'ID de servidor inválido ou o bot não está nele.' });
                     }
@@ -352,7 +353,8 @@ module.exports = {
                     // Pega o canal
                     let channel;
                     try {
-                        channel = await botClient.channels.fetch(channelId);
+                        // CORREÇÃO: Usa 'interaction.client'
+                        channel = await interaction.client.channels.fetch(channelId);
                         if (!channel || channel.type !== ChannelType.GuildText) {
                             throw new Error('Canal não é de texto.');
                         }
@@ -363,7 +365,10 @@ module.exports = {
                     // Gera um 'state' único para este botão de verificação
                     // Usamos o ID do Guild como parte do state para saber de onde veio
                     const state = uuidv4();
-                    await dbWrapper.saveAuthState(state, '@everyone', interaction.guildId); // State genérico para o botão
+                    // IMPORTANTE: O 'userId' aqui é o do admin que está criando a msg.
+                    // Precisamos de um state que funcione para *qualquer* usuário.
+                    // Vamos salvar o state com um ID de usuário "placeholder" e o guildId.
+                    await dbWrapper.saveAuthState(state, '@everyone', interaction.guildId); 
 
                     const oauthUrl = `https://discord.com/api/oauth2/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scopes.join(' '))}&state=${state}`;
 
