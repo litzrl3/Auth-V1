@@ -16,11 +16,8 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     
   async execute(interaction) {
-    // --- MUDANÇA ---
-    // Deferimos a resposta IMEDIATAMENTE, antes de qualquer 'await' do banco de dados.
-    // Isso dá a melhor chance de responder em menos de 3 segundos.
+    // Deferimos a resposta IMEDIATAMENTE
     await interaction.deferReply({ flags: 64 });
-    // --- FIM DA MUDANÇA ---
 
     const guildId = interaction.guild.id;
     
@@ -53,12 +50,12 @@ module.exports = {
           .setLabel('Puxar Membros')
           .setStyle(ButtonStyle.Primary)
           .setEmoji('👥'),
-        new ButtonButtonBuilder()
+        new ButtonBuilder() // <- CORRIGIDO (era ButtonButtonBuilder)
           .setCustomId('config_server_button')
           .setLabel('Configurar Servidores')
           .setStyle(ButtonStyle.Secondary)
           .setEmoji('⚙️'),
-        new ButtonBuilder()
+        new ButtonButtonBuilder()
           .setCustomId('create_gift_button')
           .setLabel('Criar Gift-Cards')
           .setStyle(ButtonStyle.Success)
