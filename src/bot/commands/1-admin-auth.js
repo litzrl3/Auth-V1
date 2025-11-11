@@ -16,13 +16,17 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     
   async execute(interaction) {
-    // CORRIGIDO: 'ephemeral: true' mudou para 'flags: 64'
+    // --- MUDANÇA ---
+    // Deferimos a resposta IMEDIATAMENTE, antes de qualquer 'await' do banco de dados.
+    // Isso dá a melhor chance de responder em menos de 3 segundos.
     await interaction.deferReply({ flags: 64 });
+    // --- FIM DA MUDANÇA ---
 
     const guildId = interaction.guild.id;
     
-    // Busca o servidor principal e o total de usuários
-    const mainGuildId = (await dbWrapper.getBotConfig())?.mainGuildId || 'Nenhum';
+    // Agora, fazemos as chamadas ao DB
+    const botConfig = await dbWrapper.getBotConfig();
+    const mainGuildId = botConfig?.mainGuildId || 'Nenhum';
     const totalUsers = await dbWrapper.getTotalUsers();
     
     let serverText = "Este não é o servidor principal.";
@@ -49,7 +53,7 @@ module.exports = {
           .setLabel('Puxar Membros')
           .setStyle(ButtonStyle.Primary)
           .setEmoji('👥'),
-        new ButtonBuilder()
+        new ButtonButtonBuilder()
           .setCustomId('config_server_button')
           .setLabel('Configurar Servidores')
           .setStyle(ButtonStyle.Secondary)
@@ -71,9 +75,10 @@ module.exports = {
             new ButtonBuilder()
                 .setLabel('Convidar Bot')
                 .setStyle(ButtonStyle.Link)
-                .setURL(`https://discord.com/api/oauth2/authorize?client_id=${config.CLIENT_ID}&permissions=8&scope=bot%20applications.commands`)
+                .setURL(`https://discord.com/api/oauth2/authorize?client_id=${config.clientId}&permissions=8&scope=bot%20applications.commands`)
         );
 
+    // Usamos editReply porque já deferimos a resposta
     await interaction.editReply({ embeds: [embed], components: [row1, row2] });
   },
 };
