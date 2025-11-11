@@ -1,154 +1,137 @@
-const { MongoClient, ServerApiVersion } = require('mongodb');
-const { mongodbUri } = require('../../config.js');
-
-const client = new MongoClient(mongodbUri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  }
-});
+const { MongoClient } = require('mongodb');
+const config = require('../../config');
 
 let db;
+let collections = {};
 
-// Coleções
-let usersCollection;
-let configCollection; // Simplificado: 1 coleção para toda a config
-let giftsCollection;
-let embedConfigCollection;
-let authStatesCollection; // Novo: Para o state do OAuth2
+// Função centralizada para conectar ao DB
+async function connectDb() {
+    if (db) return db;
 
-// --- FUNÇÃO DE CONEXÃO E INICIALIZAÇÃO ---
-const connectDb = async () => {
-  try {
-    await client.connect();
-    db = client.db("AuthBotDB"); 
-    
-    // Define as coleções
-    usersCollection = db.collection("users");
-    configCollection = db.collection("bot_config");
-    giftsCollection = db.collection("gifts");
-    embedConfigCollection = db.collection("embed_config");
-    authStatesCollection = db.collection("auth_states");
+    try {
+        const client = new MongoClient(config.mongodbUri);
+        await client.connect();
+        db = client.db(); // Usa o banco de dados padrão da URI
+        console.log('MongoDB conectado com sucesso.');
 
-    // Cria índices para garantir valores únicos
-    await usersCollection.createIndex({ discordId: 1 }, { unique: true });
-    await giftsCollection.createIndex({ code: 1 }, { unique: true });
-    await authStatesCollection.createIndex({ state: 1 }, { unique: true });
-    
-    // Garante que o documento de config global exista
-    await configCollection.updateOne(
-        { _id: "global" },
-        { $setOnInsert: { mainGuildId: null, verifiedRoleId: null, logsWebhookUrl: null } },
-        { upsert: true }
-    );
-    // Garante que o documento de embed exista (para o ID do guild 'default')
-    await embedConfigCollection.updateOne(
-        { _id: "default" },
-        { $setOnInsert: { title: "Verificação", description: "Clique para verificar", color: 0x5865F2, buttonLabel: "Verificar" } },
-        { upsert: true }
-    );
+        // Inicializa as coleções que o bot usa
+        collections.users = db.collection('users');
+        collections.config = db.collection('config');
+        collections.gifts = db.collection('gifts');
+        collections.authStates = db.collection('authStates');
 
-    console.log("Conectado ao MongoDB Atlas com sucesso!");
-  } catch (err) {
-    console.error('Erro ao conectar ou inicializar o MongoDB:', err);
-    process.exit(1); 
-  }
-};
+        // Garante a configuração de expiração (TTL) para os authStates
+        // Isso remove automaticamente documentos após 1 hora (3600 segundos)
+        const authStates = collections.authStates;
+        await authStates.dropIndexes(); // Limpa índices antigos para garantir
+        await authStates.createIndex({ "createdAt": 1 }, { expireAfterSeconds: 3600 });
+        console.log('Índice TTL de 1 hora para authStates garantido.');
 
-// --- FUNÇÕES DE ACESSO (CORRIGIDAS) ---
+        // Inicializa a configuração padrão do bot se não existir
+        const botConfig = await collections.config.findOne({ _id: 'botConfig' });
+        if (!botConfig) {
+            console.log('Nenhuma configuração encontrada. Criando configuração padrão...');
+            await collections.config.insertOne({
+                _id: 'botConfig',
+                mainGuildId: null,
+                logChannelWebhook: null,
+                verifiedRoleId: null,
+                embedConfig: {
+                    title: 'Verificação do Servidor',
+                    description: 'Clique no botão abaixo para se verificar.',
+                    color: '#0099ff',
+                    buttonLabel: 'Verificar-se',
+                    buttonEmoji: '✅'
+                }
+            });
+        }
+        return db;
+    } catch (error) {
+        console.error('Falha ao conectar ao MongoDB:', error);
+        process.exit(1); // Para a aplicação se não conseguir conectar ao DB
+    }
+}
+
+// Wrapper do banco de dados para ser usado em outros arquivos
 const dbWrapper = {
-  // --- Config ---
-  getBotConfig: async () => {
-    // Busca o documento de config único
-    return await configCollection.findOne({ _id: "global" });
-  },
-  saveBotConfig: async ({ mainGuildId, verifiedRoleId, logsWebhookUrl }) => {
-    // Atualiza o documento de config único
-    await configCollection.updateOne(
-      { _id: "global" },
-      { $set: { mainGuildId, verifiedRoleId, logsWebhookUrl } }
-    );
-  },
+    // --- Funções de Configuração ---
+    getBotConfig: async () => {
+        if (!collections.config) await connectDb();
+        return collections.config.findOne({ _id: 'botConfig' });
+    },
+    saveBotConfig: async (configData) => {
+        if (!collections.config) await connectDb();
+        return collections.config.updateOne(
+            { _id: 'botConfig' },
+            { $set: configData },
+            { upsert: true }
+        );
+    },
 
-  // --- Users ---
-  addUser: async (discordId, username, accessToken, refreshToken) => {
-    await usersCollection.updateOne(
-      { discordId: discordId },
-      { $set: { username, accessToken, refreshToken, authDate: new Date() } },
-      { upsert: true }
-    );
-  },
-  getUser: async (discordId) => {
-    return await usersCollection.findOne({ discordId: discordId });
-  },
-  deleteUser: async (discordId) => {
-    await usersCollection.deleteOne({ discordId: discordId });
-  },
-  getRandomUsers: async (limit) => {
-    return await usersCollection.aggregate([{ $sample: { size: limit } }]).toArray();
-  },
-  getTotalUsers: async () => { // Nome corrigido
-    return await usersCollection.countDocuments();
-  },
+    // --- Funções de Usuário ---
+    getTotalUsers: async () => {
+        if (!collections.users) await connectDb();
+        return collections.users.countDocuments();
+    },
+    getUser: async (userId) => {
+        if (!collections.users) await connectDb();
+        return collections.users.findOne({ _id: userId });
+    },
+    saveUser: async (userData) => {
+        if (!collections.users) await connectDb();
+        return collections.users.updateOne(
+            { _id: userData.id },
+            {
+                $set: {
+                    username: userData.username,
+                    accessToken: userData.accessToken,
+                    refreshToken: userData.refreshToken,
+                    expiresIn: userData.expiresIn,
+                    updatedAt: new Date()
+                }
+            },
+            { upsert: true }
+        );
+    },
+    getRandomUsers: async (count) => {
+        if (!collections.users) await connectDb();
+        // $sample é o método aggregate do MongoDB para pegar documentos aleatórios
+        return collections.users.aggregate([{ $sample: { size: count } }]).toArray();
+    },
 
-  // --- Gifts ---
-  createGift: async (code, memberCount) => {
-    await giftsCollection.insertOne({
-      code: code,
-      memberCount: memberCount,
-      isUsed: false,
-      createdAt: new Date()
-    });
-  },
-  getGift: async (code) => {
-    return await giftsCollection.findOne({ code: code });
-  },
-  useGift: async (code) => {
-    const result = await giftsCollection.updateOne(
-      { code: code, isUsed: false },
-      { $set: { isUsed: true } }
-    );
-    return result.modifiedCount > 0;
-  },
+    // --- Funções de Auth State ---
+    saveAuthState: async (state, userId = '@everyone') => {
+        if (!collections.authStates) await connectDb();
+        return collections.authStates.insertOne({
+            _id: state,
+            userId: userId,
+            createdAt: new Date()
+        });
+    },
+    getAuthState: async (state) => {
+        if (!collections.authStates) await connectDb();
+        // O findOneAndDelete é atômico, garante que o state só seja usado uma vez
+        const doc = await collections.authStates.findOneAndDelete({ _id: state });
+        return doc; // Retorna o documento encontrado (ou null)
+    },
 
-  // --- Embed Config ---
-  getEmbedConfig: async () => {
-    // Usamos um ID 'default' fixo, já que a config de embed é global
-    return await embedConfigCollection.findOne({ _id: "default" });
-  },
-  saveEmbedConfig: async (embedData) => {
-    await embedConfigCollection.updateOne(
-      { _id: "default" },
-      { $set: embedData },
-      { upsert: true }
-    );
-  },
-  
-  // --- Auth State ---
-  saveAuthState: async (state, userId, guildId) => {
-    // O state expira em 5 minutos
-    const expiration = new Date(Date.now() + 5 * 60 * 1000);
-    await authStatesCollection.insertOne({
-      state,
-      userId,
-      guildId,
-      expiresAt: expiration
-    });
-    // (Opcional: Criar um índice TTL no MongoDB Atlas para 'expiresAt' limparia isso automaticamente)
-  },
-  getAuthState: async (state) => {
-    const authData = await authStatesCollection.findOne({ state });
-    if (authData) {
-      // Deleta após o uso para segurança
-      await authStatesCollection.deleteOne({ state });
+    // --- Funções de Gift ---
+    createGift: async (giftData) => {
+        if (!collections.gifts) await connectDb();
+        return collections.gifts.insertOne(giftData);
+    },
+    getGift: async (code) => {
+        if (!collections.gifts) await connectDb();
+        return collections.gifts.findOne({ _id: code });
+    },
+    useGift: async (code) => {
+        if (!collections.gifts) await connectDb();
+        // Marca o gift como usado
+        return collections.gifts.updateOne(
+            { _id: code },
+            { $set: { used: true, usedAt: new Date() } }
+        );
     }
-    // (Verifica se expirou, embora o delete-on-use seja mais seguro)
-    if (authData && authData.expiresAt > new Date()) {
-        return authData;
-    }
-    return null;
-  }
 };
 
-module.exports = { dbWrapper, connectDb };
+module.exports = { connectDb, dbWrapper };

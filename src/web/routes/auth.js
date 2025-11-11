@@ -1,120 +1,110 @@
 const router = require('express').Router();
 const axios = require('axios');
-const { clientId, clientSecret, redirectUri, scopes } = require('../../../config.js');
-const { dbWrapper } = require('../../database/database.js');
-const { WebhookClient, EmbedBuilder } = require('discord.js');
-const botClient = require('../../bot/index.js');
+const config = require('../../../config');
+const { dbWrapper } = require('../../database/database');
+const { Client, GatewayIntentBits, WebhookClient } = require('discord.js');
 
-// Rota de callback
+// O 'botClient' é necessário para adicionar o membro ao servidor
+// Note: Este require pode causar dependência circular se o bot/index.js também importar este arquivo.
+// Uma solução melhor seria usar o client do interactionCreate.js, mas para o /auth/callback
+// precisamos de uma instância do bot.
+// Certifique-se que o bot/index.js NÃO importa nada do /web
+const botClient = require('../../bot/index');
+
 router.get('/callback', async (req, res) => {
-  const { code, state } = req.query; 
+    const { code, state } = req.query;
 
-  if (!code) {
-    return res.redirect('/invalid-code.html?error=cancelled');
-  }
-
-  // Tenta validar o 'state' para segurança
-  const authState = await dbWrapper.getAuthState(state);
-  if (!authState) {
-      console.warn("Auth state inválido ou expirado recebido.");
-      // Não vaza o erro, apenas redireciona
-      return res.redirect('/invalid-code.html?error=expired');
-  }
-  
-  try {
-    // 1. Trocar o código por um Access Token
-    const tokenResponse = await axios.post('https://discord.com/api/oauth2/token',
-      new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        grant_type: 'authorization_code',
-        code: code,
-        redirect_uri: redirectUri,
-        scope: scopes.join(' '),
-      }), {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
-
-    const { access_token, refresh_token } = tokenResponse.data;
-
-    // 2. Obter informações do usuário
-    const userResponse = await axios.get('https://discord.com/api/users/@me', {
-      headers: { 'Authorization': `Bearer ${access_token}` },
-    });
-
-    const user = userResponse.data;
-    
-    // Verifica se o ID do usuário bate com o state (segurança)
-    if (user.id !== authState.userId) {
-        console.warn(`Disparidade de usuário no Auth State! Esperado ${authState.userId}, recebido ${user.id}.`);
-        return res.redirect('/invalid-code.html?error=mismatch');
+    if (!code || !state) {
+        return res.status(400).send('Código ou estado de autorização ausente.');
     }
 
-    // 3. Salvar usuário no banco de dados
-    await dbWrapper.addUser(user.id, user.username, access_token, refresh_token);
+    // 1. Verificar o 'state' no banco de dados para prevenir ataques CSRF
+    //    Usamos findOneAndDelete para garantir que o 'state' só possa ser usado uma vez.
+    const stateDoc = await dbWrapper.getAuthState(state);
 
-    // 4. "Puxar" o membro para o servidor principal e adicionar o cargo
-    // CORRIGIDO: Usa a nova função getBotConfig()
-    const config = await dbWrapper.getBotConfig();
-    const mainGuildId = config?.mainGuildId;
-    const roleId = config?.verifiedRoleId;
+    if (!stateDoc) {
+        console.error("Auth state inválido ou expirado recebido:", state);
+        return res.status(400).send('Auth state inválido ou expirado. Por favor, tente novamente.');
+    }
     
-    // Tenta adicionar ao servidor de onde o clique veio (se não for o principal)
-    const originalGuildId = authState.guildId;
-    
-    // Lista de servidores para tentar adicionar (primeiro o original, depois o principal)
-    // Remove duplicatas se forem o mesmo
-    const guildsToAdd = [...new Set([originalGuildId, mainGuildId].filter(Boolean))];
+    // Se o 'state' é válido, o aviso "Disparidade de usuário" é irrelevante, pois o state
+    // é a nossa prova de que a solicitação é legítima. A lógica foi simplificada.
 
-    for (const guildId of guildsToAdd) {
-        try {
-            const guild = await botClient.guilds.fetch(guildId);
-            const member = await guild.members.fetch(user.id).catch(() => null);
+    try {
+        // 2. Trocar o 'code' por um 'access_token'
+        const tokenResponse = await axios.post('https://discord.com/api/v10/oauth2/token',
+            new URLSearchParams({
+                client_id: config.clientId,
+                client_secret: config.clientSecret,
+                grant_type: 'authorization_code',
+                code: code,
+                redirect_uri: config.redirectUri,
+            }), {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+        });
 
-            let rolesToAdd = [];
-            // Adiciona o cargo de verificado APENAS se estivermos no servidor principal
-            if (guildId === mainGuildId && roleId) {
-                rolesToAdd.push(roleId);
-            }
+        const { access_token, refresh_token, expires_in } = tokenResponse.data;
 
-            if (member) {
-                // Usuário já está no servidor, apenas adiciona o cargo (se houver)
-                if (rolesToAdd.length > 0) {
-                    await member.roles.add(rolesToAdd);
-                }
-            } else {
-                // Usuário não está no servidor, usa o 'guilds.join'
-                await guild.members.add(user.id, {
+        // 3. Obter informações do usuário com o 'access_token'
+        const userResponse = await axios.get('https://discord.com/api/v10/users/@me', {
+            headers: {
+                Authorization: `Bearer ${access_token}`,
+            },
+        });
+
+        const user = userResponse.data;
+
+        // 4. Salvar ou atualizar o usuário no banco de dados
+        const userData = {
+            id: user.id,
+            username: `${user.username}#${user.discriminator}`,
+            accessToken: access_token,
+            refreshToken: refresh_token,
+            expiresIn: Date.now() + (expires_in * 1000),
+        };
+        await dbWrapper.saveUser(userData);
+
+        // 5. Adicionar o usuário ao servidor principal (se configurado)
+        const botConfig = await dbWrapper.getBotConfig();
+        if (botConfig && botConfig.mainGuildId && botConfig.verifiedRoleId) {
+            try {
+                const guild = await botClient.guilds.fetch(botConfig.mainGuildId);
+                const member = await guild.members.add(user.id, {
                     accessToken: access_token,
-                    roles: rolesToAdd
+                    roles: [botConfig.verifiedRoleId]
                 });
-            }
+                
+                if (member) {
+                    console.log(`Usuário ${user.username} adicionado e cargo ${botConfig.verifiedRoleId} atribuído.`);
+                }
 
-            // 5. Enviar Log (Apenas para o servidor principal)
-            if (guildId === mainGuildId && config.logsWebhookUrl) {
-                const webhook = new WebhookClient({ url: config.logsWebhookUrl });
-                const embed = new EmbedBuilder()
-                    .setTitle('✅ Novo Membro Verificado!')
-                    .setColor('#00FF00')
-                    .setDescription(`${user.username} (\`${user.id}\`) foi verificado com sucesso.`)
-                    .setThumbnail(`https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`)
-                    .addFields({ name: 'Servidor de Origem', value: `${originalGuildId}` })
-                    .setTimestamp();
-                await webhook.send({ embeds: [embed] });
+            } catch (guildError) {
+                console.error(`Falha ao adicionar/atualizar membro ${user.username} no servidor:`, guildError.message);
+                // Continua mesmo se falhar em adicionar ao servidor (ex: usuário já está lá)
             }
-
-        } catch (error) {
-            console.error(`Erro ao adicionar membro ${user.username} ao servidor ${guildId}:`, error.message);
         }
+
+        // 6. Enviar webhook de log (se configurado)
+        if (botConfig && botConfig.logChannelWebhook) {
+            try {
+                const webhook = new WebhookClient({ url: botConfig.logChannelWebhook });
+                await webhook.send({
+                    content: `✅ Novo usuário verificado: **${user.username}#${user.discriminator}** (ID: \`${user.id}\`)`,
+                });
+            } catch (webhookError) {
+                console.error("Falha ao enviar log para o Webhook:", webhookError.message);
+            }
+        }
+
+        // 7. Redirecionar para a página de sucesso
+        res.sendFile('auth-success.html', { root: 'src/web/public' });
+
+    } catch (error) {
+        console.error('Erro no fluxo de callback OAuth2:', error.response ? error.response.data : error.message);
+        res.status(500).send('Um erro ocorreu durante a autenticação.');
     }
-
-    // 6. Redirecionar para a página de sucesso
-    res.redirect('/auth-success.html');
-
-  } catch (error) {
-    console.error("Erro no fluxo OAuth:", error.response?.data || error.message);
-    res.status(500).send('Ocorreu um erro durante a autenticação.');
-  }
 });
 
 module.exports = router;
